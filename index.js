@@ -1,13 +1,17 @@
 const express = require('express');
 const app = express();
-const port = process.env.PORT || 3000;
 const bodyParser = require('body-parser');
 const morgan = require('morgan')
+const env = require('dotenv').config();
+const mongoose = require('mongoose');
+const Phonebk = require('./mongo');
+const port = process.env.PORT || 3000;
 const cors = require('cors');
+const errorhandler = require('./error')
 
+app.use(express.static('build'))
 app.use(bodyParser.json())
 app.use(cors())
-app.use(express.static('build'))
 
 app.use(morgan((tokens, req,res) => {
    return [
@@ -20,83 +24,81 @@ app.use(morgan((tokens, req,res) => {
   ].join(' ')
 }))
 
-var tele = [
-            {
-                "name": "Arto Hellas",
-                "number": "040-123456",
-                "id": 1
-            },
-            {
-                "name": "Ada Lovelace",
-                "number": "39-44-5323523",
-                "id": 2
-            },
-            {
-                "name": "Dan Abramov",
-                "number": "12-43-234345",
-                "id": 3
-            },
-            {
-                "name": "Mary Poppendieck",
-                "number": "39-23-6423122",
-                "id": 4
-            },
-            {
-                "name": "Adam",
-                "number": "4444444444",
-                "id": 5
-            },
-            {
-                "name": "Zac",
-                "number": "123456789",
-                "id": 7
-            }
-        ]
+app.get("/api/persons", async (req, res, next ) => {
 
-app.get("/", (req,res) => {
-    res.redirect('api/persons')
+    let phonebk = await Phonebk.find({}, (err, docs) => {
+        if (docs) {
+            return res.json(docs);
+        }
+    })
+    .catch(error => next(error))
 })
 
-app.get("/api/persons", (req,res) => {
-    return res.json(tele)
+app.get('/api/persons/:id' ,async (req,res, next) => {
+    let id = req.params.id;
+    if(id) {
+        let ph = await Phonebk.findById(id, async(err, docs) => {
+                if(docs) {
+                  res.json(docs)
+                } 
+        })
+        .catch(error => next(error))
+    } 
 })
 
-app.get('/api/persons/:id' ,(req,res) => {
-    let id = Number(req.params.id); 
-    let name = tele.find((ele) => ele.id === id)
-    if(name) {
-        return res.json(name)
+app.get("/info", async(req,res) => {
+    let count = await Phonebk.estimatedDocumentCount()
+    res.json(`There are ${count} numbers in the database `)
+})
+
+app.delete('/api/persons/:id', async (req,res, next) => {
+    let id = req.params.id;
+
+    if(id) {
+    let ph = await Phonebk.findByIdAndDelete(id, (err,docs) => {
+        if(docs) {
+        res.json(`Deleted User`).status(204).end();
+        }
+     }).catch(error => {
+         next(error)
+        })
     } else {
-        res.json('Name not found')
+        res.json("Please give a proper id")
     }
 })
 
-app.get("/info", (req,res) => {
-    let dt = new Date();
-    let len = tele.length;
-    return res.json(`PhoneBook has Information about ${len} people, time of request ${dt}`)
-})
+app.post('/api/persons', async (request ,response, next) => {
 
-app.delete('/api/persons/:id', (req,res) => {
-    let id = Number(req.params.id);
-    tele = tele.filter(note => note.id !== id)
-    return res.status(204).end()
-})
+    let name = request.body.name;
+    let ph = request.body.number;
 
-app.post('/api/persons', (req,res) => {
-    let id = Math.floor(Math.random() * 100);
-    let name = req.body.name;
-    let ph = req.body.number;
     if(!name || !ph) {
-        return res.status(404).json({"error": "Name or Number not provided"}).end()
+        return response.status(404).json({"error": "Name or Number not provided"}).end()
     }
-    let nameNotAvail = tele.every(ele => ele.name !== name)
-    if(!nameNotAvail) {
-        return res.status(400).json('Name already present').end()
-    }
-    tele = tele.concat({name: name, number: ph, id: id})
-    return res.json(tele)
+
+    let phonebk = new Phonebk({name: name, number: ph})
+
+                await phonebk.save()
+                            .then(res => response.redirect('/api/persons'))
+                             .catch(error => next(error))
 })
+
+app.put("/api/persons/:id", async (req,res, next) => {
+   let id = req.params.id;
+   let num = req.body.number;
+   if(id && num) {
+       let phbk = await Phonebk.findByIdAndUpdate(id, req.body, { runValidators: true, context: 'query' },async (err, docs) => {
+            if(docs) {
+                res.json(docs)
+            }
+    })
+    .catch(error => next(error))
+   } else {
+       res.json('Not updated')
+   }
+})
+
+app.use(errorhandler)
 
 app.listen(port)
 console.log(`Server is listening on ${port}`)
